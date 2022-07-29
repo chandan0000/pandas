@@ -237,10 +237,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         object.__setattr__(self, "_is_copy", None)
         object.__setattr__(self, "_mgr", data)
         object.__setattr__(self, "_item_cache", {})
-        if attrs is None:
-            attrs = {}
-        else:
-            attrs = dict(attrs)
+        attrs = {} if attrs is None else dict(attrs)
         object.__setattr__(self, "_attrs", attrs)
         object.__setattr__(self, "_flags", Flags(self, allows_duplicate_labels=True))
 
@@ -262,16 +259,12 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         # make a copy if explicitly requested
         if copy:
             mgr = mgr.copy()
-        if dtype is not None:
-            # avoid further copies if we can
-            if (
-                isinstance(mgr, BlockManager)
-                and len(mgr.blocks) == 1
-                and is_dtype_equal(mgr.blocks[0].values.dtype, dtype)
-            ):
-                pass
-            else:
-                mgr = mgr.astype(dtype=dtype)
+        if dtype is not None and (
+            not isinstance(mgr, BlockManager)
+            or len(mgr.blocks) != 1
+            or not is_dtype_equal(mgr.blocks[0].values.dtype, dtype)
+        ):
+            mgr = mgr.astype(dtype=dtype)
         return mgr
 
     @classmethod
@@ -499,9 +492,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
     @final
     def _construct_axes_dict(self, axes=None, **kwargs):
         """Return an axes dictionary for myself."""
-        d = {a: self._get_axis(a) for a in (axes or self._AXIS_ORDERS)}
-        d.update(kwargs)
-        return d
+        return {a: self._get_axis(a) for a in (axes or self._AXIS_ORDERS)} | kwargs
 
     @final
     @classmethod
@@ -602,7 +593,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
 
         d: dict[str, Series | MultiIndex] = {}
         for axis_name in self._AXIS_ORDERS:
-            d.update(self._get_axis_resolvers(axis_name))
+            d |= self._get_axis_resolvers(axis_name)
 
         return {clean_column_name(k): v for k, v in d.items() if not isinstance(k, int)}
 
@@ -775,10 +766,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         j = self._get_axis_number(axis2)
 
         if i == j:
-            if copy:
-                return self.copy()
-            return self
-
+            return self.copy() if copy else self
         mapping = {i: j, j: i}
 
         new_axes = (self._get_axis(mapping.get(k, k)) for k in range(self._AXIS_LEN))
@@ -1111,22 +1099,21 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         if mapper is None and index is None and columns is None:
             raise TypeError("must pass an index to rename")
 
-        if index is not None or columns is not None:
-            if axis is not None:
-                raise TypeError(
-                    "Cannot specify both 'axis' and any of 'index' or 'columns'"
-                )
-            elif mapper is not None:
-                raise TypeError(
-                    "Cannot specify both 'mapper' and any of 'index' or 'columns'"
-                )
-        else:
+        if index is None and columns is None:
             # use the mapper argument
             if axis and self._get_axis_number(axis) == 1:
                 columns = mapper
             else:
                 index = mapper
 
+        elif axis is not None:
+            raise TypeError(
+                "Cannot specify both 'axis' and any of 'index' or 'columns'"
+            )
+        elif mapper is not None:
+            raise TypeError(
+                "Cannot specify both 'mapper' and any of 'index' or 'columns'"
+            )
         self._check_inplace_and_allows_duplicate_labels(inplace)
         result = self if inplace else self.copy(deep=copy)
 
@@ -1155,11 +1142,10 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
             result._set_axis_nocheck(new_index, axis=axis_no, inplace=True)
             result._clear_item_cache()
 
-        if inplace:
-            self._update_inplace(result)
-            return None
-        else:
+        if not inplace:
             return result.__finalize__(self, method="rename")
+        self._update_inplace(result)
+        return None
 
     @rewrite_axis_style_signature("mapper", [("copy", True), ("inplace", False)])
     def rename_axis(self, mapper=lib.no_default, **kwargs):
@@ -1306,16 +1292,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
 
         inplace = validate_bool_kwarg(inplace, "inplace")
 
-        if mapper is not lib.no_default:
-            # Use v0.23 behavior if a scalar or list
-            non_mapper = is_scalar(mapper) or (
-                is_list_like(mapper) and not is_dict_like(mapper)
-            )
-            if non_mapper:
-                return self._set_axis_name(mapper, axis=axis, inplace=inplace)
-            else:
-                raise ValueError("Use `.rename` to alter labels with a mapper.")
-        else:
+        if mapper is lib.no_default:
             # Use new behavior.  Means that index and/or columns
             # is specified
             result = self if inplace else self.copy(deep=copy)
@@ -1324,8 +1301,9 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
                 v = axes.get(self._get_axis_name(axis))
                 if v is lib.no_default:
                     continue
-                non_mapper = is_scalar(v) or (is_list_like(v) and not is_dict_like(v))
-                if non_mapper:
+                if non_mapper := is_scalar(v) or (
+                    is_list_like(v) and not is_dict_like(v)
+                ):
                     newnames = v
                 else:
                     f = com.get_rename_function(v)
@@ -1334,6 +1312,13 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
                 result._set_axis_name(newnames, axis=axis, inplace=True)
             if not inplace:
                 return result
+
+        elif non_mapper := is_scalar(mapper) or (
+            is_list_like(mapper) and not is_dict_like(mapper)
+        ):
+            return self._set_axis_name(mapper, axis=axis, inplace=inplace)
+        else:
+            raise ValueError("Use `.rename` to alter labels with a mapper.")
 
     @final
     def _set_axis_name(self, name, axis=0, inplace=False):
@@ -1829,11 +1814,9 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
 
         # Validate keys
         keys = com.maybe_make_list(keys)
-        invalid_keys = [
+        if invalid_keys := [
             k for k in keys if not self._is_label_or_level_reference(k, axis=axis)
-        ]
-
-        if invalid_keys:
+        ]:
             raise ValueError(
                 "The following keys are not valid labels or "
                 f"levels for axis {axis}: {invalid_keys}"
@@ -2065,28 +2048,27 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
                 # compat for older pickles
                 state["_mgr"] = state.pop("_data")
             typ = state.get("_typ")
-            if typ is not None:
-                attrs = state.get("_attrs", {})
-                object.__setattr__(self, "_attrs", attrs)
-                flags = state.get("_flags", {"allows_duplicate_labels": True})
-                object.__setattr__(self, "_flags", Flags(self, **flags))
-
-                # set in the order of internal names
-                # to avoid definitional recursion
-                # e.g. say fill_value needing _mgr to be
-                # defined
-                meta = set(self._internal_names + self._metadata)
-                for k in list(meta):
-                    if k in state and k != "_flags":
-                        v = state[k]
-                        object.__setattr__(self, k, v)
-
-                for k, v in state.items():
-                    if k not in meta:
-                        object.__setattr__(self, k, v)
-
-            else:
+            if typ is None:
                 raise NotImplementedError("Pre-0.12 pickles are no longer supported")
+            attrs = state.get("_attrs", {})
+            object.__setattr__(self, "_attrs", attrs)
+            flags = state.get("_flags", {"allows_duplicate_labels": True})
+            object.__setattr__(self, "_flags", Flags(self, **flags))
+
+            # set in the order of internal names
+            # to avoid definitional recursion
+            # e.g. say fill_value needing _mgr to be
+            # defined
+            meta = set(self._internal_names + self._metadata)
+            for k in list(meta):
+                if k in state and k != "_flags":
+                    v = state[k]
+                    object.__setattr__(self, k, v)
+
+            for k, v in state.items():
+                if k not in meta:
+                    object.__setattr__(self, k, v)
+
         elif len(state) == 2:
             raise NotImplementedError("Pre-0.12 pickles are no longer supported")
 
@@ -2107,10 +2089,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         Returns a LaTeX representation for a particular object.
         Mainly for use with nbconvert (jupyter notebook conversion to pdf).
         """
-        if config.get_option("display.latex.repr"):
-            return self.to_latex()
-        else:
-            return None
+        return self.to_latex() if config.get_option("display.latex.repr") else None
 
     @final
     def _repr_data_resource_(self):
@@ -2552,11 +2531,8 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         """
         from pandas.io import json
 
-        if date_format is None and orient == "table":
-            date_format = "iso"
-        elif date_format is None:
-            date_format = "epoch"
-
+        if date_format is None:
+            date_format = "iso" if orient == "table" else "epoch"
         config.is_nonnegative_int(indent)
         indent = indent or 0
 
@@ -3799,12 +3775,11 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
             loc = index.get_loc(key)
 
             if isinstance(loc, np.ndarray):
-                if loc.dtype == np.bool_:
-                    (inds,) = loc.nonzero()
-                    return self._take_with_is_copy(inds, axis=axis)
-                else:
+                if loc.dtype != np.bool_:
                     return self._take_with_is_copy(loc, axis=axis)
 
+                (inds,) = loc.nonzero()
+                return self._take_with_is_copy(inds, axis=axis)
             if not is_scalar(loc):
                 new_index = index[loc]
 
@@ -4200,15 +4175,14 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         axis = self._get_axis(axis)
 
         if axis.is_unique:
-            if level is not None:
-                if not isinstance(axis, MultiIndex):
-                    raise AssertionError("axis must be a MultiIndex")
-                new_axis = axis.drop(labels, level=level, errors=errors)
-            else:
+            if level is None:
                 new_axis = axis.drop(labels, errors=errors)
-            result = self.reindex(**{axis_name: new_axis})
+            elif not isinstance(axis, MultiIndex):
+                raise AssertionError("axis must be a MultiIndex")
+            else:
+                new_axis = axis.drop(labels, level=level, errors=errors)
+            return self.reindex(**{axis_name: new_axis})
 
-        # Case for non-unique axis
         else:
             labels = ensure_object(com.index_labels_to_array(labels))
             if level is not None:
@@ -4233,9 +4207,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
             slicer = [slice(None)] * self.ndim
             slicer[self._get_axis_number(axis_name)] = indexer
 
-            result = self.loc[tuple(slicer)]
-
-        return result
+            return self.loc[tuple(slicer)]
 
     @final
     def _update_inplace(self, result, verify_is_copy: bool_t = True) -> None:
@@ -4823,10 +4795,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
             for axis, ax in axes.items()
             if ax is not None
         ):
-            if copy:
-                return self.copy()
-            return self
-
+            return self.copy() if copy else self
         # check if we are a multi reindex
         if self._needs_reindex_multi(axes, method, level):
             return self._reindex_multi(axes, copy, fill_value)
@@ -5160,9 +5129,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         7   whale
         8   zebra
         """
-        if n == 0:
-            return self.iloc[0:0]
-        return self.iloc[-n:]
+        return self.iloc[:0] if n == 0 else self.iloc[-n:]
 
     @final
     def sample(
@@ -5304,26 +5271,24 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
 
             # Strings acceptable if a dataframe and axis = 0
             if isinstance(weights, str):
-                if isinstance(self, ABCDataFrame):
-                    if axis == 0:
-                        try:
-                            weights = self[weights]
-                        except KeyError as err:
-                            raise KeyError(
-                                "String passed to weights not a valid column"
-                            ) from err
-                    else:
-                        raise ValueError(
-                            "Strings can only be passed to "
-                            "weights when sampling from rows on "
-                            "a DataFrame"
-                        )
-                else:
+                if not isinstance(self, ABCDataFrame):
                     raise ValueError(
                         "Strings cannot be passed as weights "
                         "when sampling from a Series."
                     )
 
+                if axis != 0:
+                    raise ValueError(
+                        "Strings can only be passed to "
+                        "weights when sampling from rows on "
+                        "a DataFrame"
+                    )
+                try:
+                    weights = self[weights]
+                except KeyError as err:
+                    raise KeyError(
+                        "String passed to weights not a valid column"
+                    ) from err
             if isinstance(self, ABCSeries):
                 func = self._constructor
             else:
@@ -5363,7 +5328,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
             )
         elif frac is None and n % 1 != 0:
             raise ValueError("Only integers accepted as `n` values")
-        elif n is None and frac is not None:
+        elif n is None:
             n = round(frac * axis_length)
         elif frac is not None:
             raise ValueError("Please enter a value for `frac` OR `n`, not both")
@@ -5511,19 +5476,15 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
 
         # if this fails, go on to more involved attribute setting
         # (note that this matches __getattr__, above).
-        if name in self._internal_names_set:
-            object.__setattr__(self, name, value)
-        elif name in self._metadata:
+        if name in self._internal_names_set or name in self._metadata:
             object.__setattr__(self, name, value)
         else:
             try:
                 existing = getattr(self, name)
-                if isinstance(existing, Index):
+                if isinstance(existing, Index) or name not in self._info_axis:
                     object.__setattr__(self, name, value)
-                elif name in self._info_axis:
-                    self[name] = value
                 else:
-                    object.__setattr__(self, name, value)
+                    self[name] = value
             except (AttributeError, TypeError):
                 if isinstance(self, ABCDataFrame) and (is_list_like(value)):
                     warnings.warn(
@@ -5592,12 +5553,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
         if self._mgr.is_single_block:
             return False
 
-        if self._mgr.any_extension_types:
-            # Even if they have the same dtype, we can't consolidate them,
-            #  so we pretend this is "mixed'"
-            return True
-
-        return self.dtypes.nunique() > 1
+        return True if self._mgr.any_extension_types else self.dtypes.nunique() > 1
 
     @final
     def _check_inplace_setting(self, value) -> bool_t:
@@ -6181,21 +6137,17 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
                 convert_boolean,
                 convert_floating,
             )
-        else:
-            results = [
-                col._convert_dtypes(
-                    infer_objects,
-                    convert_string,
-                    convert_integer,
-                    convert_boolean,
-                    convert_floating,
-                )
-                for col_name, col in self.items()
-            ]
-            if len(results) > 0:
-                return concat(results, axis=1, copy=False)
-            else:
-                return self.copy()
+        results = [
+            col._convert_dtypes(
+                infer_objects,
+                convert_string,
+                convert_integer,
+                convert_boolean,
+                convert_floating,
+            )
+            for col_name, col in self.items()
+        ]
+        return concat(results, axis=1, copy=False) if results else self.copy()
 
     # ----------------------------------------------------------------------
     # Filling NA's
@@ -6347,53 +6299,50 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
                 coerce=True,
                 downcast=downcast,
             )
+        elif self.ndim == 1:
+            if isinstance(value, (dict, ABCSeries)):
+                value = create_series_with_explicit_dtype(
+                    value, dtype_if_empty=object
+                )
+                value = value.reindex(self.index, copy=False)
+                value = value._values
+            elif is_list_like(value):
+                raise TypeError(
+                    '"value" parameter must be a scalar, dict '
+                    "or Series, but you passed a "
+                    f'"{type(value).__name__}"'
+                )
+
+            new_data = self._mgr.fillna(
+                value=value, limit=limit, inplace=inplace, downcast=downcast
+            )
+
+        elif isinstance(value, (dict, ABCSeries)):
+            if axis == 1:
+                raise NotImplementedError(
+                    "Currently only can fill "
+                    "with dict/Series column "
+                    "by column"
+                )
+
+            result = self if inplace else self.copy()
+            is_dict = isinstance(downcast, dict)
+            for k, v in value.items():
+                if k not in result:
+                    continue
+                obj = result[k]
+                downcast_k = downcast.get(k) if is_dict else downcast
+                obj.fillna(v, limit=limit, inplace=True, downcast=downcast_k)
+            return None if inplace else result
+
+        elif not is_list_like(value):
+            new_data = self._mgr.fillna(
+                value=value, limit=limit, inplace=inplace, downcast=downcast
+            )
+        elif isinstance(value, ABCDataFrame) and self.ndim == 2:
+            new_data = self.where(self.notna(), value)._data
         else:
-            if self.ndim == 1:
-                if isinstance(value, (dict, ABCSeries)):
-                    value = create_series_with_explicit_dtype(
-                        value, dtype_if_empty=object
-                    )
-                    value = value.reindex(self.index, copy=False)
-                    value = value._values
-                elif not is_list_like(value):
-                    pass
-                else:
-                    raise TypeError(
-                        '"value" parameter must be a scalar, dict '
-                        "or Series, but you passed a "
-                        f'"{type(value).__name__}"'
-                    )
-
-                new_data = self._mgr.fillna(
-                    value=value, limit=limit, inplace=inplace, downcast=downcast
-                )
-
-            elif isinstance(value, (dict, ABCSeries)):
-                if axis == 1:
-                    raise NotImplementedError(
-                        "Currently only can fill "
-                        "with dict/Series column "
-                        "by column"
-                    )
-
-                result = self if inplace else self.copy()
-                is_dict = isinstance(downcast, dict)
-                for k, v in value.items():
-                    if k not in result:
-                        continue
-                    obj = result[k]
-                    downcast_k = downcast if not is_dict else downcast.get(k)
-                    obj.fillna(v, limit=limit, inplace=True, downcast=downcast_k)
-                return result if not inplace else None
-
-            elif not is_list_like(value):
-                new_data = self._mgr.fillna(
-                    value=value, limit=limit, inplace=inplace, downcast=downcast
-                )
-            elif isinstance(value, ABCDataFrame) and self.ndim == 2:
-                new_data = self.where(self.notna(), value)._data
-            else:
-                raise ValueError(f"invalid fill value with a {type(value)}")
+            raise ValueError(f"invalid fill value with a {type(value)}")
 
         result = self._constructor(new_data)
         if inplace:
@@ -6503,11 +6452,7 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
                 regex = True
 
             items = list(to_replace.items())
-            if items:
-                keys, values = zip(*items)
-            else:
-                keys, values = ([], [])
-
+            keys, values = zip(*items) if items else ([], [])
             are_mappings = [is_dict_like(v) for v in values]
 
             if any(are_mappings):
@@ -6587,40 +6532,38 @@ class NDFrame(PandasObject, indexing.IndexingMixin):
                 )
 
             elif to_replace is None:
-                if not (
+                if (
                     is_re_compilable(regex)
                     or is_list_like(regex)
                     or is_dict_like(regex)
                 ):
+                    return self.replace(
+                        regex, value, inplace=inplace, limit=limit, regex=True
+                    )
+                else:
                     raise TypeError(
                         f"'regex' must be a string or a compiled regular expression "
                         f"or a list or dict of strings or regular expressions, "
                         f"you passed a {repr(type(regex).__name__)}"
                     )
-                return self.replace(
-                    regex, value, inplace=inplace, limit=limit, regex=True
+            elif is_dict_like(value):  # NA -> {'A' : 0, 'B' : -1}
+                # Operate column-wise
+                if self.ndim == 1:
+                    raise ValueError(
+                        "Series.replace cannot use dict-value and "
+                        "non-None to_replace"
+                    )
+                mapping = {col: (to_replace, val) for col, val in value.items()}
+                return self._replace_columnwise(mapping, inplace, regex)
+
+            elif not is_list_like(value):  # NA -> 0
+                new_data = self._mgr.replace(
+                    to_replace=to_replace, value=value, inplace=inplace, regex=regex
                 )
             else:
-
-                # dest iterable dict-like
-                if is_dict_like(value):  # NA -> {'A' : 0, 'B' : -1}
-                    # Operate column-wise
-                    if self.ndim == 1:
-                        raise ValueError(
-                            "Series.replace cannot use dict-value and "
-                            "non-None to_replace"
-                        )
-                    mapping = {col: (to_replace, val) for col, val in value.items()}
-                    return self._replace_columnwise(mapping, inplace, regex)
-
-                elif not is_list_like(value):  # NA -> 0
-                    new_data = self._mgr.replace(
-                        to_replace=to_replace, value=value, inplace=inplace, regex=regex
-                    )
-                else:
-                    raise TypeError(
-                        f'Invalid "to_replace" type: {repr(type(to_replace).__name__)}'
-                    )
+                raise TypeError(
+                    f'Invalid "to_replace" type: {repr(type(to_replace).__name__)}'
+                )
 
         result = self._constructor(new_data)
         if inplace:

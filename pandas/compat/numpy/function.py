@@ -119,12 +119,11 @@ def validate_argmax_with_skipna(skipna, args, kwargs):
     return skipna
 
 
-ARGSORT_DEFAULTS: Dict[str, Optional[Union[int, str]]] = {}
-ARGSORT_DEFAULTS["axis"] = -1
-ARGSORT_DEFAULTS["kind"] = "quicksort"
-ARGSORT_DEFAULTS["order"] = None
-ARGSORT_DEFAULTS["kind"] = None
-
+ARGSORT_DEFAULTS: Dict[str, Optional[Union[int, str]]] = {
+    "axis": -1,
+    "order": None,
+    "kind": None,
+}
 
 validate_argsort = CompatValidator(
     ARGSORT_DEFAULTS, fname="argsort", max_fname_arg_count=0, method="both"
@@ -132,9 +131,7 @@ validate_argsort = CompatValidator(
 
 # two different signatures of argsort, this second validation for when the
 # `kind` param is supported
-ARGSORT_DEFAULTS_KIND: Dict[str, Optional[int]] = {}
-ARGSORT_DEFAULTS_KIND["axis"] = -1
-ARGSORT_DEFAULTS_KIND["order"] = None
+ARGSORT_DEFAULTS_KIND: Dict[str, Optional[int]] = {"axis": -1, "order": None}
 validate_argsort_kind = CompatValidator(
     ARGSORT_DEFAULTS_KIND, fname="argsort", max_fname_arg_count=0, method="both"
 )
@@ -176,9 +173,7 @@ def validate_clip_with_axis(axis, args, kwargs):
     return axis
 
 
-CUM_FUNC_DEFAULTS: Dict[str, Any] = {}
-CUM_FUNC_DEFAULTS["dtype"] = None
-CUM_FUNC_DEFAULTS["out"] = None
+CUM_FUNC_DEFAULTS: Dict[str, Any] = {"dtype": None, "out": None}
 validate_cum_func = CompatValidator(
     CUM_FUNC_DEFAULTS, method="both", max_fname_arg_count=1
 )
@@ -201,11 +196,13 @@ def validate_cum_func_with_skipna(skipna, args, kwargs, name):
     return skipna
 
 
-ALLANY_DEFAULTS: Dict[str, Optional[bool]] = {}
-ALLANY_DEFAULTS["dtype"] = None
-ALLANY_DEFAULTS["out"] = None
-ALLANY_DEFAULTS["keepdims"] = False
-ALLANY_DEFAULTS["axis"] = None
+ALLANY_DEFAULTS: Dict[str, Optional[bool]] = {
+    "dtype": None,
+    "out": None,
+    "keepdims": False,
+    "axis": None,
+}
+
 validate_all = CompatValidator(
     ALLANY_DEFAULTS, fname="all", method="both", max_fname_arg_count=1
 )
@@ -239,16 +236,15 @@ validate_round = CompatValidator(
     ROUND_DEFAULTS, fname="round", method="both", max_fname_arg_count=1
 )
 
-SORT_DEFAULTS: Dict[str, Optional[Union[int, str]]] = {}
-SORT_DEFAULTS["axis"] = -1
-SORT_DEFAULTS["kind"] = "quicksort"
-SORT_DEFAULTS["order"] = None
+SORT_DEFAULTS: Dict[str, Optional[Union[int, str]]] = {
+    "axis": -1,
+    "kind": "quicksort",
+    "order": None,
+}
+
 validate_sort = CompatValidator(SORT_DEFAULTS, fname="sort", method="kwargs")
 
-STAT_FUNC_DEFAULTS: Dict[str, Optional[Any]] = {}
-STAT_FUNC_DEFAULTS["dtype"] = None
-STAT_FUNC_DEFAULTS["out"] = None
-
+STAT_FUNC_DEFAULTS: Dict[str, Optional[Any]] = {"dtype": None, "out": None}
 SUM_DEFAULTS = STAT_FUNC_DEFAULTS.copy()
 SUM_DEFAULTS["axis"] = None
 SUM_DEFAULTS["keepdims"] = False
@@ -279,15 +275,15 @@ validate_median = CompatValidator(
     MEDIAN_DEFAULTS, fname="median", method="both", max_fname_arg_count=1
 )
 
-STAT_DDOF_FUNC_DEFAULTS: Dict[str, Optional[bool]] = {}
-STAT_DDOF_FUNC_DEFAULTS["dtype"] = None
-STAT_DDOF_FUNC_DEFAULTS["out"] = None
-STAT_DDOF_FUNC_DEFAULTS["keepdims"] = False
+STAT_DDOF_FUNC_DEFAULTS: Dict[str, Optional[bool]] = {
+    "dtype": None,
+    "out": None,
+    "keepdims": False,
+}
+
 validate_stat_ddof_func = CompatValidator(STAT_DDOF_FUNC_DEFAULTS, method="kwargs")
 
-TAKE_DEFAULTS: Dict[str, Optional[str]] = {}
-TAKE_DEFAULTS["out"] = None
-TAKE_DEFAULTS["mode"] = "raise"
+TAKE_DEFAULTS: Dict[str, Optional[str]] = {"out": None, "mode": "raise"}
 validate_take = CompatValidator(TAKE_DEFAULTS, fname="take", method="kwargs")
 
 
