@@ -137,10 +137,7 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
 
     def __getitem__(self, item: PositionalIndexer) -> BaseMaskedArray | Any:
         if is_integer(item):
-            if self._mask[item]:
-                return self.dtype.na_value
-            return self._data[item]
-
+            return self.dtype.na_value if self._mask[item] else self._data[item]
         item = check_array_indexer(self, item)
 
         return type(self)(self._data[item], self._mask[item])
@@ -305,10 +302,7 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
         dtype = pandas_dtype(dtype)
 
         if is_dtype_equal(dtype, self.dtype):
-            if copy:
-                return self.copy()
-            return self
-
+            return self.copy() if copy else self
         # if we are astyping to another nullable masked dtype, we can fastpath
         if isinstance(dtype, BaseMaskedDtype):
             # TODO deal with NaNs for FloatingArray case
@@ -501,10 +495,7 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
         if self._hasna:
             data = self.to_numpy("float64", na_value=np.nan)
 
-        op = getattr(nanops, "nan" + name)
+        op = getattr(nanops, f"nan{name}")
         result = op(data, axis=0, skipna=skipna, mask=mask, **kwargs)
 
-        if np.isnan(result):
-            return libmissing.NA
-
-        return result
+        return libmissing.NA if np.isnan(result) else result

@@ -54,12 +54,7 @@ class NumericDtype(BaseMaskedDtype):
         if not array.type.equals(pyarrow_type):
             array = array.cast(pyarrow_type)
 
-        if isinstance(array, pyarrow.Array):
-            chunks = [array]
-        else:
-            # pyarrow.ChunkedArray
-            chunks = array.chunks
-
+        chunks = [array] if isinstance(array, pyarrow.Array) else array.chunks
         results = []
         for arr in chunks:
             data, mask = pyarrow_array_to_numpy_and_mask(arr, dtype=self.type)
@@ -101,15 +96,18 @@ class NumericArray(BaseMaskedArray):
                 raise NotImplementedError("can only perform ops with 1-d structures")
             if len(self) != len(other):
                 raise ValueError("Lengths must match")
-            if not (is_float_dtype(other) or is_integer_dtype(other)):
+            if not is_float_dtype(other) and not is_integer_dtype(other):
                 raise TypeError("can only perform ops with numeric values")
 
         elif isinstance(other, (datetime.timedelta, np.timedelta64)):
             other = Timedelta(other)
 
-        else:
-            if not (is_float(other) or is_integer(other) or other is libmissing.NA):
-                raise TypeError("can only perform ops with numeric values")
+        elif (
+            not is_float(other)
+            and not is_integer(other)
+            and other is not libmissing.NA
+        ):
+            raise TypeError("can only perform ops with numeric values")
 
         if omask is None:
             mask = self._mask.copy()
